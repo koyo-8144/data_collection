@@ -15,7 +15,7 @@ from moveit_msgs.srv import GetPositionFK
 from geometry_msgs.msg import Pose
 from geometry_msgs.msg import Point
 
-CHECK_ORDER = False
+CHECK_ORDER = True
 
 
 class OpenVlaEnv(dm_env.Environment):

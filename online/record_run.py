@@ -14,7 +14,7 @@ import tensorflow_datasets as tfds
 
 import rclpy
 from rclpy.node import Node
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
 from std_msgs.msg import Float32  # Replace with the appropriate message type
 
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
@@ -31,8 +31,8 @@ from moveit_msgs.srv import GetPositionFK
 from geometry_msgs.msg import Pose
 from geometry_msgs.msg import Point
 
-from openvla_env import OpenVlaEnv
-from openvla_env import CHECK_ORDER
+from data_collection.online.openvla_env import OpenVlaEnv
+from data_collection.online.openvla_env import CHECK_ORDER
 
 FLAGS = flags.FLAGS
 
@@ -47,6 +47,7 @@ class Gen3LiteNode(Node):
 
         cb_group_1 = MutuallyExclusiveCallbackGroup()
         cb_group_2 = MutuallyExclusiveCallbackGroup()
+        timer_cb_group = MutuallyExclusiveCallbackGroup()
 
 
         # Create subscription
@@ -58,8 +59,13 @@ class Gen3LiteNode(Node):
         # )
 
         self.fk_client = self.create_client(GetPositionFK, '/compute_fk', callback_group=cb_group_2)
-        # while not self.fk_client.wait_for_service(timeout_sec=1.0):
-        #     #print('Service not available, waiting again...')
+        while not self.fk_client.wait_for_service(timeout_sec=1.0):
+            print('Service not available, waiting again...')
+        if self.fk_client.service_is_ready():
+           print("service is ready")
+        #    breakpoint()
+
+        self.timer = self.create_timer(0.001, self._timer_cb, callback_group=cb_group_1)
         
         # self.cap = cv2.VideoCapture(6)  # Open the default camera  #v4l2-ctl --list-devices
         # self.bridge = CvBridge()
@@ -78,6 +84,7 @@ class Gen3LiteNode(Node):
 
         self.start_joint = False
         self.start_action = False
+        self.joint_received = False
 
     def start_obs(self):
         if CHECK_ORDER:
@@ -89,8 +96,10 @@ class Gen3LiteNode(Node):
         self.start_joint = True
 
     def joint_callback(self, msg):
+        logging.info("joint_callback")
         if not self.start_joint:
             return
+
         
         self.start_joint = False
 
@@ -100,10 +109,8 @@ class Gen3LiteNode(Node):
           else:
             print("2")
 
-        joint_states = msg
         joint_names = msg.name
-        joint_positions = np.array(msg.position) 
-        self.joint_positions = joint_positions
+        joint_positions = np.array(msg.position)
         # d: double-precision floating-point numbers (8 bytes per element), matching the float64 data type.
         
         # #print(f"Received joint names: {joint_names}")
@@ -114,12 +121,51 @@ class Gen3LiteNode(Node):
             "joint_positions": joint_positions,
         }
 
-        joint_states_dummy = JointState()
-        joint_states_dummy.position = [0.1, -0.3, 0.12, 0.1, 0.5, 0.2]
+        # print("Joint names:", " ".join(joint_names))
+        # print("Joint positions:", " ".join(map(str, joint_positions)))
 
-        self.get_end_effecter_position(joint_states)
+        # # Desired order of joints without "right_finger_bottom_joint"
+        # desired_order = [
+        #     "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"
+        # ]
+        # Desired order of joints with "right_finger_bottom_joint"
+        desired_order = [
+            "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"
+        ]
 
-    def get_end_effecter_position(self, joint_states):
+        # Create a map to store positions indexed by joint names
+        name_position_map = dict(zip(joint_names, joint_positions))
+
+        # Reorder joint_names and joint_positions based on desired_order
+        reordered_positions = []
+        reordered_names = []
+        for name in desired_order:
+            if name in name_position_map:
+                reordered_positions.append(name_position_map[name])
+                reordered_names.append(name)
+
+        # Update joint_names and joint_positions
+        self.joint_names = reordered_names
+        self.joint_positions = reordered_positions
+
+        # print("Reordered joint names:", " ".join(self.joint_names))
+        # print("Reordered joint positions:", " ".join(map(str, self.joint_positions)))
+
+        self.joint_received = True
+
+        # self.get_end_effecter_position(joint_positions, joint_names)
+
+    def _timer_cb(self):
+        logging.info("_timer_cb")
+        if not self.joint_received:
+          return
+        
+
+        self.joint_received = False
+    
+        self.get_end_effecter_position(self.joint_positions, self.joint_names)
+
+    def get_end_effecter_position(self, joint_positions, joint_names):
         if CHECK_ORDER:
           if self.start_action:
             print("10")
@@ -140,23 +186,24 @@ class Gen3LiteNode(Node):
 
         #print("Sending request to /compute_fk service...")
         fk_future = self.fk_client.call_async(fk_request)
-        # rclpy.spin_until_future_complete(self, fk_future)
+        rclpy.spin_until_future_complete(self, fk_future)
         #print("Waiting for /compute_fk response...")
 
         # while not self.fk_client.wait_for_service(timeout_sec=3.0):
         #     print('Service not available, waiting again...')
 
         try:
-            time.sleep(0.1)
+            # time.sleep(0.1)
             response = fk_future.result()
             # logging.info(f'FK response: {response}')
             #print("response ", response)
-            ee_position_x = response.pose_stamped[0].pose.position.x
-            ee_position_y = response.pose_stamped[0].pose.position.y
-            ee_position_x = response.pose_stamped[0].pose.position.z
+            # ee_pos_x = response.pose_stamped[0].pose.position.x
+            # ee_pos_y = response.pose_stamped[0].pose.position.y
+            # ee_pos_x = response.pose_stamped[0].pose.position.z
+            # ee_ori_x = response.pose_stamped[0].pose.orientation.x
             #print(f"End effector position: x={ee_position.x}, y={ee_position.y}, z={ee_position.z}")
         except Exception as e:
-            print('Service call failed')
+            # print('Service call failed')
             pos_x, pos_y, pos_z, rot_x, rot_y, rot_z, rot_w = random.uniform(-1.0, 1.0), random.uniform(-1.0, 1.0), random.uniform(-1.0, 1.0), random.uniform(-1.0, 1.0), random.uniform(-1.0, 1.0), random.uniform(-1.0, 1.0), random.uniform(-1.0, 1.0)
             ee_position_dummy = Point()
             ee_position_dummy.x = pos_x
@@ -233,8 +280,9 @@ class Gen3LiteNode(Node):
     def get_obs(self):
         if CHECK_ORDER:
           print("0")
+
         self.start_obs()
-        time.sleep(0.01)
+        # time.sleep(0.1)
         if CHECK_ORDER:
           print("5")
 
