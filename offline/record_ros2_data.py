@@ -30,7 +30,10 @@ class Gen3LiteClientNode(Node):
         )
 
         self.ee_states_pub = self.create_publisher(
-            Pose, "/ee_states", 10
+            Pose, "/ee_states", 10, callback_group=cb_group
+        )
+        self.action_delta_pub = self.create_publisher(
+            Pose, "/action_delta", 10
         )
 
         self.fk_client = self.create_client(GetPositionFK, '/compute_fk', callback_group=client_cb_group)
@@ -60,6 +63,8 @@ class Gen3LiteClientNode(Node):
         self.desired_order = [
             "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"
         ]
+
+        self.action_delta_pub_count = 0
 
     # There is no problem with executing jonit_callback in a row as long as _timer_callback is executed after joint_callback
     def joint_callback(self, msg):
@@ -148,7 +153,47 @@ class Gen3LiteClientNode(Node):
         # Publish the end-effector position
         self.ee_states_pub.publish(self.ee_states)
         # self.get_logger().info(f"Published EE states: {self.ee_states}")
-        
+
+
+
+        if self.action_delta_pub_count != 0: # I can not get action_delta_previous at first
+            self.previous_ee_states = self.current_ee_states
+            self.current_ee_states = self.ee_states
+            
+            #### Data processing in jupyter notebook ####
+            # obs_t (This loop) ---> action_delta_t ---> obs_t+1 but we never know action_delta_t until the next loop
+            # However, action_delta_t-1 can be obtained since obs_t-1 ---> action_delta_t-1(This loop) ---> obs_t(This loop)
+            # In summary, I get action_delta_t-1 and obs_t in this loop so it is going to look like this:
+            #    
+            # action_delta_t-2   obs_t-1
+            # action_delta_t-1   obs_t
+            # action_delta_t     obs_t+1
+            # 
+            # I need to cut down action_delta_top and put one-up action_delta colum to look like this:
+            #    
+            # action_delta_t-2 (<- remove this)   
+            # action_delta_t-1   obs_t-1
+            # action_delta_t     obs_t
+            #                    obs_t+1(<- This row's done and reward should be 1)
+
+            action_delta_previous = Pose()
+            action_delta_previous.position.x = self.current_ee_states.position.x - self.previous_ee_states.position.x
+            action_delta_previous.position.y = self.current_ee_states.position.y - self.previous_ee_states.position.y
+            action_delta_previous.position.z = self.current_ee_states.position.z - self.previous_ee_states.position.z
+            action_delta_previous.orientation.x = self.current_ee_states.orientation.x - self.previous_ee_states.orientation.x
+            action_delta_previous.orientation.y = self.current_ee_states.orientation.y - self.previous_ee_states.orientation.y
+            action_delta_previous.orientation.z = self.current_ee_states.orientation.z - self.previous_ee_states.orientation.z
+            action_delta_previous.orientation.w = self.current_ee_states.orientation.w - self.previous_ee_states.orientation.w
+            
+
+            # Publish the action displacement
+            self.action_delta_pub.publish(action_delta_previous)
+            self.get_logger().info(f"Published action delta: {action_delta_previous}")
+
+        else:
+            self.current_ee_states = self.ee_states
+
+        self.action_delta_pub_count += 1
 
 
 def main(args=None):
