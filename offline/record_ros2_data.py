@@ -164,14 +164,20 @@ class Gen3LiteClientNode(Node):
             # obs_t (This loop) ---> action_delta_t ---> obs_t+1 but we never know action_delta_t until the next loop
             # However, action_delta_t-1 can be obtained since obs_t-1 ---> action_delta_t-1(This loop) ---> obs_t(This loop)
             # In summary, I get action_delta_t-1 and obs_t in this loop so it is going to look like this:
-            #    
-            # action_delta_t-2   obs_t-1
-            # action_delta_t-1   obs_t
-            # action_delta_t     obs_t+1
+            #                      obs_0
+            # action_delta_0       obs_1
+            #      .                 .
+            # action_delta_t-2     obs_t-1
+            # action_delta_t-1     obs_t
+            # action_delta_t       obs_t+1
+            # 
+            # action_delta_last-1  obs_last
             # 
             # I need to cut down action_delta_top and put one-up action_delta colum to look like this:
             #    
-            # action_delta_t-2 (<- remove this)   
+            # action_delta_0      obs_0
+            #     
+            # action_delta_t-2      
             # action_delta_t-1   obs_t-1
             # action_delta_t     obs_t
             #                    obs_t+1(<- This row's done and reward should be 1)
