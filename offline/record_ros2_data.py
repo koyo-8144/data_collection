@@ -13,6 +13,8 @@ from sensor_msgs.msg import JointState
 from moveit_msgs.srv import GetPositionFK
 from geometry_msgs.msg import Pose
 from geometry_msgs.msg import Point
+from sensor_msgs.msg import Image
+
 
 CHECK_ORDER = False
 
@@ -27,6 +29,12 @@ class Gen3LiteClientNode(Node):
 
         self.joint_sub = self.create_subscription(
             JointState, "/joint_states", self.joint_callback, 10, callback_group=cb_group
+        )
+        self.color_image_sub = self.create_subscription(
+            Image, "/camera/camera/color/image_raw", self.color_image_callback, 10, callback_group=cb_group
+        )
+        self.depth_image_sub = self.create_subscription(
+            Image, "/camera/camera/depth/image_rect_raw", self.depth_image_callback, 10, callback_group=cb_group
         )
 
         self.ee_states_pub = self.create_publisher(
@@ -57,9 +65,9 @@ class Gen3LiteClientNode(Node):
         self.joint_received = False
 
         # # Desired order of joints without "right_finger_bottom_joint"
-        # self.desired_order = [
-        #     "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"
-        # ]
+        self.desired_order = [
+            "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"
+        ]
         self.desired_order = [
             "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"
         ]
@@ -68,7 +76,6 @@ class Gen3LiteClientNode(Node):
 
     # There is no problem with executing jonit_callback in a row as long as _timer_callback is executed after joint_callback
     def joint_callback(self, msg):
-        
         print("joint_callback")
         self.joint_received = True # gate for fk_timer_callback
 
@@ -98,7 +105,11 @@ class Gen3LiteClientNode(Node):
 
         ##---> _timer_callback
 
+    def color_image_callback(self, msg):
+        print("color_image_callback")
 
+    def depth_image_callback(self, msg):
+        print("depth_image_callback")
 
     def _timer_callback(self):
         if not self.joint_received:
@@ -115,8 +126,8 @@ class Gen3LiteClientNode(Node):
         fk_request = GetPositionFK.Request()
 
         fk_request.header.frame_id = 'world'
-        # fk_request.fk_link_names = ['right_finger_prox_link']
-        fk_request.fk_link_names = ['end_effector_link']
+        fk_request.fk_link_names = ['right_finger_prox_link']
+        # fk_request.fk_link_names = ['end_effector_link']
         # fk_request.robot_state.joint_state = joint_states
         fk_request.robot_state.joint_state.name = joint_names
         fk_request.robot_state.joint_state.position = joint_positions
